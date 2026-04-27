@@ -352,23 +352,62 @@ const LIMIT = 10000;
   const saved = localStorage.getItem('wl_api_key');
   if (saved) {
     apiKey = saved;
-    document.getElementById('keyInput').value = '••••' + saved.slice(-4);
+    document.getElementById('keyInput').value = '';
+    document.getElementById('keyInput').placeholder = '✓ Key saved — ' + saved.slice(-4);
     setConnected(true);
+    // Auto-verify saved key on load
+    setTimeout(() => testKey(), 500);
   }
 })();
 
 // ── API KEY ────────────────────────────────────────────────────────────────
 function connectKey() {
   const val = document.getElementById('keyInput').value.trim();
-  if (val.startsWith('••••') && apiKey) { setConnected(true); return; }
+
+  // If field is empty or only contains masking characters, use saved key
+  const isMasked = !val || val.replace(/[•*]/g, '').length === 0 || (val.length <= 8 && localStorage.getItem('wl_api_key'));
+  if (isMasked && localStorage.getItem('wl_api_key')) {
+    apiKey = localStorage.getItem('wl_api_key');
+    setConnected(true);
+    testKey();
+    return;
+  }
+
   if (!val) { showStatus('readStatus', '⚠ Please paste your ElevenLabs API key above first.', 'err'); return; }
   if (val.length < 20) { showStatus('readStatus', '⚠ That key looks too short — please copy the full key from ElevenLabs → Developers → API Keys.', 'err'); return; }
+
   apiKey = val;
   localStorage.setItem('wl_api_key', val);
-  document.getElementById('keyInput').value = '••••' + val.slice(-4);
+  document.getElementById('keyInput').value = '';
+  document.getElementById('keyInput').placeholder = '✓ Key saved — ' + val.slice(-4);
   setConnected(true);
-  showStatus('readStatus', '✓ Connected! Now upload your .txt file below.', 'ok');
-  setTimeout(() => hideStatus('readStatus'), 3000);
+  testKey();
+}
+
+async function testKey() {
+  showStatus('readStatus', '⏳ Verifying key with ElevenLabs…', 'info');
+  try {
+    const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
+      headers: { 'xi-api-key': apiKey }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const remaining = data.character_limit - data.character_count;
+      showStatus('readStatus', `✓ Key verified! ${remaining.toLocaleString()} characters remaining this month. Upload your file below.`, 'ok');
+      setTimeout(() => hideStatus('readStatus'), 5000);
+    } else if (res.status === 401) {
+      apiKey = '';
+      localStorage.removeItem('wl_api_key');
+      document.getElementById('keyInput').value = '';
+      document.getElementById('keyInput').placeholder = 'Paste your ElevenLabs API key…';
+      setConnected(false);
+      showStatus('readStatus', '❌ Key rejected by ElevenLabs. Please copy your key again from elevenlabs.io → Developers → API Keys.', 'err');
+    } else {
+      showStatus('readStatus', `⚠ Could not verify key (status ${res.status}) but will try anyway. Upload your file below.`, 'info');
+    }
+  } catch(e) {
+    showStatus('readStatus', '⚠ Could not reach ElevenLabs to verify — check your connection. Key saved anyway.', 'info');
+  }
 }
 
 function setConnected(ok) {
